@@ -3,7 +3,7 @@ import {
   NodeIO,
   Accessor,
 } from "@gltf-transform/core"
-import { mat4, vec3} from "gl-matrix"
+import { mat4, vec3, quat } from "gl-matrix"
 
 function main() {
   const doc = new Document()
@@ -12,8 +12,8 @@ function main() {
   const verts = [] as [number, number, number][]
   const triangles = [] as [number, number, number][]
 
+  // The center
   verts.push([0, 0, 0])
-
   const divisions = 6
   for (let i = 0; i < divisions; i++) {
     const theta = 2 * Math.PI / divisions * i
@@ -21,20 +21,18 @@ function main() {
     triangles.push([0, i + 1, (i + 1) % divisions + 1])
   }
 
-  const vertsAccessor = doc.createAccessor("verts")
-    .setArray(new Float32Array(verts.map(v => [v[0], v[1], v[2]]).flat()))
+  const vertsAccessor = doc.createAccessor("vertsAccessor")
+    .setArray(new Float32Array(verts.flat()))
     .setType(Accessor.Type.VEC3)
     .setBuffer(buffer)
 
-  const indicesAccessor = doc.createAccessor("indices")
+  const indicesAccessor = doc.createAccessor("indicesAccessor")
     .setArray(new Uint32Array(triangles.flat()))
     .setType(Accessor.Type.SCALAR)
     .setBuffer(buffer)
 
   const skin = doc.createSkin("skin")
-  const jointCenterPos = vec3.fromValues(0.5, 0, 0)
-  const joint0Pos = vec3.fromValues(0.5, 0, 0)
-  const jointPositions = [jointCenterPos, joint0Pos]
+  const jointPositions = [vec3.fromValues(0.5, 0, 0), vec3.fromValues(0.5, 0, 0)]
   const joints = jointPositions.map((pos, i) => {
     return doc.createNode(`joint${i}`)
       .setTranslation([pos[0], pos[1], pos[2]])
@@ -68,8 +66,18 @@ function main() {
   weights.push([1, 0, 0, 0])
   weights.push([1, 0, 0, 0])
 
-  const weightsAccessor = doc.createAccessor("weights").setArray(new Float32Array(weights.flat())).setType(Accessor.Type.VEC4).setBuffer(buffer)
-  const jointsAccessor = doc.createAccessor("jointAssignments").setArray(new Uint32Array(jointAssignments.flat())).setType(Accessor.Type.VEC4).setBuffer(buffer)
+  const jointsAccessor = doc
+    .createAccessor("jointAssignments")
+    // Joint assignments must be stored as unsigned bytes or unsingned shorts, Uint8Array or Uint16Array.
+    .setArray(new Uint8Array(jointAssignments.flat()))
+    .setType(Accessor.Type.VEC4)
+    .setBuffer(buffer)
+
+  const weightsAccessor = doc
+    .createAccessor("weights")
+    .setArray(new Float32Array(weights.flat()))
+    .setType(Accessor.Type.VEC4)
+    .setBuffer(buffer)
 
   const primitive = doc.createPrimitive()
     .setAttribute("POSITION", vertsAccessor)
@@ -80,9 +88,9 @@ function main() {
   const polygon = doc.createNode("polygon").setMesh(mesh)
   polygon.setSkin(skin)
 
-  const jointCenterMatrix = mat4.fromTranslation(mat4.create(), jointCenterPos)
+  const jointCenterMatrix = mat4.fromTranslation(mat4.create(), jointPositions[0])
   mat4.invert(jointCenterMatrix, jointCenterMatrix)
-  const joint0Matrix = mat4.fromTranslation(mat4.create(), vec3.add(vec3.create(), jointCenterPos, joint0Pos))
+  const joint0Matrix = mat4.fromTranslation(mat4.create(), vec3.add(vec3.create(), jointPositions[0], jointPositions[1]))
   mat4.invert(joint0Matrix, joint0Matrix)
   const inverseBindMatrices = [] as number[]
  
@@ -97,11 +105,10 @@ function main() {
   const inverseBindMatricesAccessor = doc
     .createAccessor("inverseBindMatrices")
     .setArray(new Float32Array(inverseBindMatrices))
-    .setType(Accessor.Type.MAT4).setBuffer(buffer)
+    .setType(Accessor.Type.MAT4)
+    .setBuffer(buffer)
 
   skin.setInverseBindMatrices(inverseBindMatricesAccessor)
-
-  doc.createScene().addChild(polygon)
 
   const times = doc.createAccessor("times")
     .setArray(new Float32Array([0, 1, 2, 3, 4]))
@@ -110,23 +117,25 @@ function main() {
 
   const positionAccessor = doc.createAccessor("positions")
     .setArray(new Float32Array([
-      0.5, 0, 0,
-      0.5, 0, -1,
-      0.5, 0, 0,
-      0.5, 0, 1,
-      0.5, 0, 0,
-    ]))
+      vec3.add(vec3.create(), jointPositions[1], vec3.fromValues(0, 0, 0)),
+      vec3.add(vec3.create(), jointPositions[1], vec3.fromValues(0, 0, -1)),
+      vec3.add(vec3.create(), jointPositions[1], vec3.fromValues(0, 0, 0)),
+      vec3.add(vec3.create(), jointPositions[1], vec3.fromValues(0, 0, 1)),
+      vec3.add(vec3.create(), jointPositions[1], vec3.fromValues(0, 0, 0)),
+    ].map(p => [p[0], p[1], p[2]]).flat()))
     .setType(Accessor.Type.VEC3)
     .setBuffer(buffer)
 
-  const rotationAccessor = doc.createAccessor("rotations")
-    .setArray(new Float32Array([
-      0, 0, 0, 1,
-      0, 0, -1, 1,
-      0, 0, 0, 1,
-      0, 0, 1, 1,
-      0, 0, 0, 1,
-    ]))
+  const rotations = [] as mat4[]
+  rotations.push(mat4.fromQuat(mat4.create(), quat.fromEuler(quat.create(), 0, 0, 0)))
+  rotations.push(mat4.fromQuat(mat4.create(), quat.fromEuler(quat.create(), 0, 0, -90)))
+  rotations.push(mat4.fromQuat(mat4.create(), quat.fromEuler(quat.create(), 0, 0, 0)))
+  rotations.push(mat4.fromQuat(mat4.create(), quat.fromEuler(quat.create(), 0, 0, 90)))
+  rotations.push(mat4.fromQuat(mat4.create(), quat.fromEuler(quat.create(), 0, 0, 0)))
+
+  const rotationAccessor = doc
+    .createAccessor("rotations")
+    .setArray(new Float32Array(rotations.map(m => [m[0], m[1], m[2], m[3]]).flat()))
     .setType(Accessor.Type.VEC4)
     .setBuffer(buffer)
 
@@ -155,6 +164,11 @@ function main() {
     .addSampler(positionSampler)
     .addChannel(rotationChannel)
     .addSampler(rotationSampler)
+
+  const container = doc.createNode("container")
+  container.addChild(polygon)
+  container.addChild(joints[0])
+  doc.createScene().addChild(container)
 
   const io = new NodeIO()
   io.write("polygon.glb", doc)
